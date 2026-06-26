@@ -15,6 +15,7 @@
 A unified tracking interface that supports logging data to different backend
 """
 import dataclasses
+import numbers
 from enum import Enum
 from functools import partial
 from pathlib import Path
@@ -35,6 +36,7 @@ class Tracking(object):
                 assert backend in self.supported_backend, f'{backend} is not supported'
 
         self.logger = {}
+        self._finished = False
 
         if 'tracking' in default_backend or 'wandb' in default_backend:
             import wandb
@@ -59,7 +61,26 @@ class Tracking(object):
     def log(self, data, step, backend=None):
         for default_backend, logger_instance in self.logger.items():
             if backend is None or default_backend in backend:
-                logger_instance.log(data=data, step=step)
+                payload = data
+                if default_backend in {'wandb', 'mlflow'}:
+                    payload = _filter_numeric_metrics(data)
+                if payload:
+                    logger_instance.log(data=payload, step=step)
+
+    def finish(self, exit_code=0):
+        if self._finished:
+            return
+        self._finished = True
+
+        for default_backend, logger_instance in self.logger.items():
+            if default_backend == 'wandb':
+                logger_instance.finish(exit_code=exit_code)
+            elif default_backend == 'mlflow':
+                logger_instance.finish(exit_code=exit_code)
+            else:
+                flush = getattr(logger_instance, 'flush', None)
+                if callable(flush):
+                    flush()
 
 
 class _MlflowLoggingAdapter:
@@ -67,6 +88,11 @@ class _MlflowLoggingAdapter:
     def log(self, data, step):
         import mlflow
         mlflow.log_metrics(metrics=data, step=step)
+
+    def finish(self, exit_code=0):
+        import mlflow
+        status = 'FINISHED' if exit_code == 0 else 'FAILED'
+        mlflow.end_run(status=status)
 
 
 def _compute_mlflow_params_from_objects(params) -> Dict[str, Any]:
@@ -94,6 +120,23 @@ def _transform_params_to_json_serializable(x, convert_list_to_dict: bool):
         return x.value
 
     return x
+
+
+def _filter_numeric_metrics(data: Dict[str, Any]) -> Dict[str, float]:
+    metrics = {}
+    for key, value in data.items():
+        if isinstance(value, numbers.Number):
+            metrics[key] = float(value)
+            continue
+        item = getattr(value, 'item', None)
+        if callable(item):
+            try:
+                scalar = item()
+            except Exception:
+                continue
+            if isinstance(scalar, numbers.Number):
+                metrics[key] = float(scalar)
+    return metrics
 
 
 def _flatten_dict(raw: Dict[str, Any], *, sep: str) -> Dict[str, Any]:

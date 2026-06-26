@@ -197,8 +197,17 @@ def main_task(config):
                             reward_fn=reward_fn,
                             val_reward_fn=val_reward_fn,
                             )
-    trainer.init_workers()
-    trainer.fit()
+    exit_code = 0
+    try:
+        trainer.init_workers()
+        trainer.fit()
+    except Exception:
+        exit_code = 1
+        raise
+    finally:
+        logger = getattr(trainer, 'logger', None)
+        if logger is not None:
+            logger.finish(exit_code=exit_code)
 
 
 if __name__ == '__main__':
