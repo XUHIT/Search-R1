@@ -849,6 +849,13 @@ class RayPPOTrainer(object):
                         val_metrics = self._validate()
                         pprint(f'Final validation metrics: {val_metrics}')
                         logger.log(data=val_metrics, step=self.global_steps)
+
+                    if self.config.trainer.save_freq > 0:
+                        actor_final_path = os.path.join(self.config.trainer.default_local_dir, 'actor',
+                                                        f'global_step_{self.global_steps}')
+                        if not os.path.exists(actor_final_path):
+                            print(f'Saving final checkpoint at global_step_{self.global_steps}')
+                            self._save_checkpoint()
                     return
     
     def _create_loss_mask(self, batch, metrics):
